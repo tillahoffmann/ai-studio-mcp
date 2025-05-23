@@ -47,16 +47,35 @@ function getParentWithTag(element, tagName) {
 
 
 /**
+ * Safely select an element using a CSS selector or raise an error.
+ * @param {Element} element
+ * @param {string} selector
+ * @returns {HTMLElement}
+ */
+function safeQuerySelector(element, selector) {
+  const selected = element.querySelector(selector);
+  if (selected !== null) {
+    // @ts-ignore
+    return selected;
+  } else {
+    throw new Error(`Failed to select '${selector}' from '${element}'.`);
+  }
+}
+
+
+/**
  * @param {String} html representing a single node.
- * @return {HTMLElement}
+ * @return {Element}
  */
 function htmlToNode(html) {
   const template = document.createElement('template');
   template.innerHTML = html;
-  if (template.content.firstChild) {
-    // @ts-ignore
-    return template.content.firstChild;
-  } else { throw new Error("No child.") }
+  const numChildren = template.content.childElementCount;
+  if (numChildren != 1) {
+    throw new Error(`Expected exactly one child element, got ${numChildren}.`);
+  }
+  // @ts-ignore
+  return template.content.firstChild;
 }
 
 
@@ -78,14 +97,44 @@ function parseJsonRpcMessage(payload) {
   return JSON.parse(parts[1].substring(6).trim());
 }
 
+/**
+ * Set the value of a <textarea> element and dispatch an 'input' event.
+ * @param {HTMLTextAreaElement} element
+ * @param {string} value
+ */
 function setTextareaValue(element, value) {
   element.value = value;
-  // Manually dispatch the 'input' event
   const inputEvent = new Event('input', {
-    bubbles: true,    // Whether the event bubbles up through the DOM
-    cancelable: true  // Whether the event is cancelable
+    bubbles: true,
+    cancelable: true
   });
   element.dispatchEvent(inputEvent);
+}
+
+
+/**
+ *
+ * @param {Function} func Function to attempt to complete.
+ * @param {number} interval Polling interval in ms.
+ * @param {number} timeout Timeout after which to give up in ms.
+ * @returns {Promise}
+ */
+function pollUntil(func, interval, timeout) {
+  const start = Date.now();
+
+  return new Promise((resolve, reject) => {
+    const handle = setInterval(() => {
+      try {
+        const result = func();
+        clearInterval(handle);
+        resolve(result);
+      } catch {
+        if (Date.now() - start > timeout) {
+          clearInterval(handle);
+          reject(`Function '${func}' did not complete successfully in ${timeout} ms.`);
+        }
+    }}, interval);
+  });
 }
 
 
@@ -105,8 +154,8 @@ async function handleChatTurn(node) {
   const functionCall = node.querySelector(tags.functionCallChunk);
   if (functionCall) {
     /** @type {HTMLElement | null} */
-    const nameElement = functionCall.querySelector(".name");
-    const payloadElement = functionCall.querySelector("pre");
+    const nameElement = safeQuerySelector(functionCall, ".name");
+    const payloadElement = safeQuerySelector(functionCall, "pre");
     if (nameElement && payloadElement) {
       const name = nameElement.innerText.trim();
       const arguments = payloadElement.innerText.trim();
@@ -135,20 +184,19 @@ async function handleChatTurn(node) {
 
           // Naively assume there is only one part.
           for (const part of payload.result.content) {
-            const responseTextarea = functionCall.querySelector("textarea");
-            if (responseTextarea) {
-              setTextareaValue(responseTextarea, part.text);
-              // Submit automatically in autoSend mode.
-              if (config.autoSend) {
-                console.log("Attempting to submit results automatically ..");
-                /** @type {HTMLElement | null} */
-                const submitButton = functionCall.querySelector("button[type=submit]");
-                if (submitButton) {
-                  submitButton.click();
+            const responseTextarea = safeQuerySelector(functionCall, "textarea");
+            // @ts-ignore
+            setTextareaValue(responseTextarea, part.text);
+            // Submit automatically in autoSend mode.
+            if (config.autoSend) {
+              const submitButton = safeQuerySelector(functionCall, "button[type=submit]");
+              pollUntil(() => {
+                // @ts-ignore
+                if (submitButton.disabled) {
+                  throw new Error("Response submit button is disabled.");
                 }
-              }
-            } else {
-              console.error("Failed to paste response because text area is missing.");
+                submitButton.click();
+              }, 100, 1000);
             }
           }
         },
@@ -170,7 +218,7 @@ async function handleChatTurn(node) {
 // Add an import button to the function declaration.
 /** @param {Element} node */
 async function addFunctionDeclarationImportButton(node) {
-  const actions = node.querySelector(tags.dialogActions);
+  const actions = safeQuerySelector(node, tags.dialogActions);
   const urlInput = htmlToNode(
     `<input placeholder="MCP Server Url" style="margin-right: 8px; flex-grow: 1; min-width: 200px;">`
   );
@@ -230,11 +278,8 @@ async function addFunctionDeclarationImportButton(node) {
           });
           const declarationJson = JSON.stringify(functions, null, 2);
 
-          const textarea = node.querySelector("textarea");
-          if (!textarea) {
-            return;
-          }
-
+          const textarea = safeQuerySelector(node, "textarea");
+          // @ts-ignore
           setTextareaValue(textarea, declarationJson);
           // @ts-ignore
           await GM.setValue("mcpServerUrl", urlInput.value);

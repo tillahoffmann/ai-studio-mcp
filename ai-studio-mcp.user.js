@@ -155,42 +155,43 @@ async function handleChatTurn(node) {
     /** @type {HTMLElement | null} */
     const nameElement = safeQuerySelector(functionCall, ".name");
     const payloadElement = safeQuerySelector(functionCall, "pre");
-    if (nameElement && payloadElement) {
-      const name = nameElement.innerText.trim();
-      const arguments = payloadElement.innerText.trim();
-      console.log(`Calling ${name} with arguments ${arguments} ...`);
+    const name = nameElement.innerText.trim();
+    const arguments = JSON.parse(payloadElement.innerText.trim());
+    console.log(`🔨 Calling '${name}' with arguments ${JSON.stringify(arguments)} ...`);
 
-      const payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-          "name": name,
-          "arguments": JSON.parse(arguments),
-        },
-        "id": "4",
-      };
+    const payload = {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": name,
+        "arguments": arguments,
+      },
+      "id": "4",
+    };
+    // @ts-ignore
+    GM_xmlhttpRequest({
+      method: "POST",
       // @ts-ignore
-      GM_xmlhttpRequest({
-        method: "POST",
-        // @ts-ignore
-        url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json,text/event-stream",
-        },
-        onload: function (response) {
-          const payload = parseJsonRpcMessage(response.responseText);
-          console.log(payload);
+      url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json,text/event-stream",
+      },
+      onload: async (response) => {
+        console.log(`✅ Received response with ${response.responseText.length} bytes.`);
+        const payload = parseJsonRpcMessage(response.responseText);
 
-          // Naively assume there is only one part.
-          for (const part of payload.result.content) {
-            const responseTextarea = safeQuerySelector(functionCall, "textarea");
-            // @ts-ignore
-            setTextareaValue(responseTextarea, part.text);
-            // Submit automatically in autoSend mode.
-            // @ts-ignore
-            if (await GM.getValue("mcpAutoSubmit")) {
-              const submitButton = safeQuerySelector(functionCall, "button[type=submit]");
+        // Naively assume there is only one part.
+        for (const part of payload.result.content) {
+          /** @type {HTMLTextAreaElement} */
+          // @ts-ignore
+          const responseTextarea = safeQuerySelector(functionCall, "textarea");
+          setTextareaValue(responseTextarea, part.text);
+          // Submit automatically in autoSend mode.
+          // @ts-ignore
+          if (await GM.getValue("mcpAutoSubmit")) {
+            const submitButton = safeQuerySelector(functionCall, "button[type=submit]");
+            try {
               pollUntil(() => {
                 // @ts-ignore
                 if (submitButton.disabled) {
@@ -198,23 +199,23 @@ async function handleChatTurn(node) {
                 }
                 submitButton.click();
               }, 100, 1000);
+            } catch {
+              console.error("⚠️ Failed to auto-submit response.");
             }
           }
-        },
-        onerror: function (error) {
-          console.error(error);
-        },
-        data: JSON.stringify(payload),
-      });
-    }
-    else {
-      console.error("Found function call chunk but cannot get name and payload.");
-    }
+        }
+      },
+      onerror: function (error) {
+        console.error("⚠️ Failed to get response.");
+      },
+      data: JSON.stringify(payload),
+    });
   } else {
     console.log("This chat turn does not contain a function call ...");
     console.log(node);
   }
 }
+
 
 // Add an import button to the function declaration.
 /** @param {Element} node */

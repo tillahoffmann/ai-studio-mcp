@@ -104,11 +104,19 @@ function parseJsonRpcMessage(payload) {
  */
 function setTextareaValue(element, value) {
   element.value = value;
+
   const inputEvent = new Event('input', {
     bubbles: true,
-    cancelable: true
+    cancelable: false,
+    composed: true,
   });
   element.dispatchEvent(inputEvent);
+
+  const changeEvent = new Event('change', {
+    bubbles: true,
+    cancelable: false
+  });
+  element.dispatchEvent(changeEvent);
 }
 
 

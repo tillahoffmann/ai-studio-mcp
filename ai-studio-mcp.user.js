@@ -171,10 +171,16 @@ async function handleFunctionCall(functionCall) {
     "id": "4",
   };
   // @ts-ignore
+  const serverUrl = await GM.getValue("mcpServerUrl");
+  if (!serverUrl) {
+    console.error("⚠️ No MCP server url is set.");
+    return;
+  }
+
+  // @ts-ignore
   GM_xmlhttpRequest({
     method: "POST",
-    // @ts-ignore
-    url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
+    url: serverUrl,
     headers: {
       "Content-Type": "application/json",
       "Accept": "application/json,text/event-stream",
@@ -246,7 +252,7 @@ async function addFunctionDeclarationImportButton(node) {
   // @ts-ignore
   const urlInput = safeQuerySelector(mcpContainer, "#mcpServerUrlInput");
   // @ts-ignore
-  urlInput.value = await GM.getValue("mcpServerUrl");
+  urlInput.value = await GM.getValue("mcpServerUrl", "http://localhost:7777");
 
   const button = safeQuerySelector(mcpContainer, "#loadMcpToolsButton");
   button.addEventListener("click", async () => {

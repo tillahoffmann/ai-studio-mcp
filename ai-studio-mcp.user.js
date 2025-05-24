@@ -131,7 +131,8 @@ function pollUntil(func, interval, timeout) {
           clearInterval(handle);
           reject(`Function '${func}' did not complete successfully in ${timeout} ms.`);
         }
-    }}, interval);
+      }
+    }, interval);
   });
 }
 
@@ -321,10 +322,10 @@ function mutationCallback(mutationsList, observer) {
   for (const mutation of mutationsList) {
     if (mutation.type === "childList") {
       for (const node of mutation.addedNodes) {
-        // console.log(`Added node ${node.tagName}.`);
-        if (node.tagName.toLowerCase() == tags.chatTurn) {
+        const tagName = node.tagName.toLowerCase();
+        if (tagName == tags.chatTurn || tagName == tags.promptChunk) {
           handleChatTurn(node);
-        } else if (node.tagName.toLowerCase() == tags.functionDeclarationsDialog) {
+        } else if (tagName == tags.functionDeclarationsDialog) {
           addFunctionDeclarationImportButton(node);
         }
       }

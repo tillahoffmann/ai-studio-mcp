@@ -138,82 +138,84 @@ function pollUntil(func, interval, timeout) {
 
 
 /**
- * Handle the addition of a chat turn.
- * @param {HTMLElement} node
+ * Handle a function call.
+ *
+ * @param {HTMLElement} functionCall
  */
-async function handleChatTurn(node) {
-  if (node.querySelector(".user-prompt-container")) {
-    console.log("Skipping user prompt.");
+async function handleFunctionCall(functionCall) {
+  // If there is no submit button, it's already been processed.
+  /** @type {HTMLButtonElement | null} */
+  const submitButton = functionCall.querySelector("button[type=submit]");
+  if (submitButton === null) {
     return;
   }
-  if (node.querySelector("ms-thought-chunk")) {
-    console.log("Skipping thought chunk.");
+  // Mark this as being processed so we don't handle it multiple times.
+  if (functionCall.getAttribute("mcp-processing") == "true") {
     return;
   }
-  const functionCall = node.querySelector(tags.functionCallChunk);
-  if (functionCall) {
-    /** @type {HTMLElement | null} */
-    const nameElement = safeQuerySelector(functionCall, ".name");
-    const payloadElement = safeQuerySelector(functionCall, "pre");
-    const name = nameElement.innerText.trim();
-    const arguments = JSON.parse(payloadElement.innerText.trim());
-    console.log(`🔨 Calling '${name}' with arguments ${JSON.stringify(arguments)} ...`);
+  functionCall.setAttribute("mcp-processing", "true");
 
-    const payload = {
-      "jsonrpc": "2.0",
-      "method": "tools/call",
-      "params": {
-        "name": name,
-        "arguments": arguments,
-      },
-      "id": "4",
-    };
+  const nameElement = safeQuerySelector(functionCall, ".name");
+  const payloadElement = safeQuerySelector(functionCall, "pre");
+  const name = nameElement.innerText.trim();
+  const arguments = JSON.parse(payloadElement.innerText.trim());
+  console.log(`🔨 Calling '${name}' with arguments ${JSON.stringify(arguments)} ...`);
+
+  const payload = {
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": name,
+      "arguments": arguments,
+    },
+    "id": "4",
+  };
+  // @ts-ignore
+  GM_xmlhttpRequest({
+    method: "POST",
     // @ts-ignore
-    GM_xmlhttpRequest({
-      method: "POST",
-      // @ts-ignore
-      url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json,text/event-stream",
-      },
-      onload: async (response) => {
-        console.log(`✅ Received response with ${response.responseText.length} bytes.`);
-        const payload = parseJsonRpcMessage(response.responseText);
+    url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json,text/event-stream",
+    },
+    onload: async (response) => {
+      console.log(`✅ Received response with ${response.responseText.length} bytes.`);
+      const payload = parseJsonRpcMessage(response.responseText);
 
-        // Naively assume there is only one part.
-        for (const part of payload.result.content) {
-          /** @type {HTMLTextAreaElement} */
-          // @ts-ignore
-          const responseTextarea = safeQuerySelector(functionCall, "textarea");
-          setTextareaValue(responseTextarea, part.text);
-          // Submit automatically in autoSend mode.
-          // @ts-ignore
-          if (await GM.getValue("mcpAutoSubmit")) {
-            const submitButton = safeQuerySelector(functionCall, "button[type=submit]");
-            try {
-              pollUntil(() => {
-                // @ts-ignore
-                if (submitButton.disabled) {
-                  throw new Error("Response submit button is disabled.");
-                }
+      // Naively assume there is only one part.
+      for (const part of payload.result.content) {
+        /** @type {HTMLTextAreaElement} */
+        // @ts-ignore
+        const responseTextarea = safeQuerySelector(functionCall, "textarea");
+        setTextareaValue(responseTextarea, part.text);
+        // Submit automatically in autoSend mode.
+        // @ts-ignore
+        if (await GM.getValue("mcpAutoSubmit")) {
+          try {
+            pollUntil(() => {
+              // @ts-ignore
+              if (submitButton.disabled) {
+                throw new Error("Response submit button is disabled.");
+              }
+              // This is a bit dirty to just wait, but there is some state that needs a
+              // bit longer to update before we can submit.
+              setTimeout(() => {
+                console.log("🚀 Submitting response ...");
                 submitButton.click();
-              }, 100, 1000);
-            } catch {
-              console.error("⚠️ Failed to auto-submit response.");
-            }
+              }, 500);
+            }, 100, 1000);
+          } catch {
+            console.error("⚠️ Failed to auto-submit response.");
           }
         }
-      },
-      onerror: function (error) {
-        console.error("⚠️ Failed to get response.");
-      },
-      data: JSON.stringify(payload),
-    });
-  } else {
-    console.log("This chat turn does not contain a function call ...");
-    console.log(node);
-  }
+      }
+    },
+    onerror: function (error) {
+      console.error("⚠️ Failed to get response.");
+    },
+    data: JSON.stringify(payload),
+  });
 }
 
 
@@ -319,15 +321,27 @@ async function addFunctionDeclarationImportButton(node) {
 }
 
 
+/**
+ * Observe changes.
+ * @param {Array<MutationRecord>} mutationsList
+ * @param {*} observer
+ */
 function mutationCallback(mutationsList, observer) {
   for (const mutation of mutationsList) {
     if (mutation.type === "childList") {
-      for (const node of mutation.addedNodes) {
+      /** @type {HTMLElement} */
+      let node;
+      // @ts-ignore
+      for (node of mutation.addedNodes) {
         const tagName = node.tagName.toLowerCase();
-        if (tagName == tags.chatTurn || tagName == tags.promptChunk) {
-          handleChatTurn(node);
-        } else if (tagName == tags.functionDeclarationsDialog) {
+        if (tagName == tags.functionDeclarationsDialog) {
           addFunctionDeclarationImportButton(node);
+        } else {
+          const functionCalls = node.getElementsByTagName(tags.functionCallChunk);
+          for (const functionCall of functionCalls) {
+            // @ts-ignore
+            handleFunctionCall(functionCall);
+          }
         }
       }
     }

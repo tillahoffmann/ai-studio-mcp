@@ -15,16 +15,6 @@ const tags = {
   dialogActions: "mat-dialog-actions",
 };
 
-const config = {
-  autoSend: true,
-};
-
-
-async function getMcpServerUrl() {
-  // @ts-ignore
-  return await GM.getValue("mcpServerUrl", "http://localhost:7777");
-}
-
 
 /**
  * Get the first parent with the desired tag if possible.
@@ -181,7 +171,8 @@ async function handleChatTurn(node) {
       // @ts-ignore
       GM_xmlhttpRequest({
         method: "POST",
-        url: await getMcpServerUrl(),
+        // @ts-ignore
+        url: await GM.getValue("mcpServerUrl", "http://localhost:7777"),
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json,text/event-stream",
@@ -196,7 +187,8 @@ async function handleChatTurn(node) {
             // @ts-ignore
             setTextareaValue(responseTextarea, part.text);
             // Submit automatically in autoSend mode.
-            if (config.autoSend) {
+            // @ts-ignore
+            if (await GM.getValue("mcpAutoSubmit")) {
               const submitButton = safeQuerySelector(functionCall, "button[type=submit]");
               pollUntil(() => {
                 // @ts-ignore
@@ -226,86 +218,102 @@ async function handleChatTurn(node) {
 // Add an import button to the function declaration.
 /** @param {Element} node */
 async function addFunctionDeclarationImportButton(node) {
-  const actions = safeQuerySelector(node, tags.dialogActions);
-  const urlInput = htmlToNode(
-    `<input placeholder="MCP Server Url" style="margin-right: 8px; flex-grow: 1; min-width: 200px;">`
+  const dialogHelp = safeQuerySelector(node, "mat-dialog-content");
+  const mcpContainer = htmlToNode(
+    `<div class="mcp-dialog-container">
+      <div class="mcp-flex">
+        <input type="text" placeholder="MCP Server Url" id="mcpServerUrlInput">
+        <button
+            class="mdc-button mat-mdc-button-base gmat-mdc-button light mat-mdc-button mat-mcp"
+            id="loadMcpToolsButton">
+          Load MCP Tools
+        </button>
+      </div>
+      <div>
+        <input type="checkbox" id="mcpAutoSubmitCheckbox">
+        <label for="autoSubmit">Automatically submit tool results</label><br>
+      </div>
+    </div>`
   );
-  const button = htmlToNode(
-    `<button class="mdc-button mat-mdc-button-base gmat-mdc-button light mat-mdc-button mat-mcp">
-      <span class="mat-mdc-button-persistent-ripple mdc-button__ripple"></span>
-      <span class="mdc-button__label"> Import from MCP </span>
-      <span class="mat-focus-indicator"></span>
-      <span class="mat-mdc-button-touch-target"></span>
-      <span class="mat-ripple mat-mdc-button-ripple"></span>
-    </button>`
-  );
-  if (actions && button && urlInput) {
+  // @ts-ignore
+  dialogHelp.parentElement.insertBefore(mcpContainer, dialogHelp);
 
-    button.addEventListener("click", async () => {
-      const payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/list",
-        "params": {},
-        "id": "4"
-      };
-      // @ts-ignore
-      GM_xmlhttpRequest({
-        method: "POST",
-        // @ts-ignore
-        url: urlInput.value,
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json,text/event-stream",
-        },
-        onload: async function (response) {
-          const payload = parseJsonRpcMessage(response.responseText);
+  /** @type {HTMLInputElement} */
+  // @ts-ignore
+  const urlInput = safeQuerySelector(mcpContainer, "#mcpServerUrlInput");
+  // @ts-ignore
+  urlInput.value = await GM.getValue("mcpServerUrl");
 
-          // Transform the tools to the format that's expected by Gemini. It's
-          // almost the same format as mcp but they use "parameters" instead of
-          // "inputSchema".
-          const functions = payload.result.tools.map(tool => {
-            // Delete additional fields that Google doesn't recognize.
-            const parameters = tool.inputSchema;
-            delete parameters.additionalProperties;
-            delete parameters["$schema"];
-
-            // Add standard string type if none is set and delete defaults that are
-            // not supported in AI Studio.
-            for (const key in parameters.properties) {
-              if (parameters.properties[key].type === undefined) {
-                parameters.properties[key].type = "string";
-              }
-              delete parameters.properties[key].default;
-            }
-
-            return {
-              name: tool.name,
-              description: tool.description.trim(),
-              parameters: parameters,
-            }
-          });
-          const declarationJson = JSON.stringify(functions, null, 2);
-
-          const textarea = safeQuerySelector(node, "textarea");
-          // @ts-ignore
-          setTextareaValue(textarea, declarationJson);
-          // @ts-ignore
-          await GM.setValue("mcpServerUrl", urlInput.value);
-        },
-        onerror: function (error) {
-          console.error(error);
-        },
-        data: JSON.stringify(payload),
-      });
-    });
-    actions.insertBefore(button, actions.firstChild);
-
+  const button = safeQuerySelector(mcpContainer, "#loadMcpToolsButton");
+  button.addEventListener("click", async () => {
+    const payload = {
+      "jsonrpc": "2.0",
+      "method": "tools/list",
+      "params": {},
+      "id": "4"
+    };
     // @ts-ignore
-    urlInput.value = await getMcpServerUrl();
-    actions.insertBefore(urlInput, actions.firstChild);
-  } else {
-    console.error("could not find some elements");
-  }
+    GM_xmlhttpRequest({
+      method: "POST",
+      // @ts-ignore
+      url: urlInput.value,
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json,text/event-stream",
+      },
+      onload: async function (response) {
+        const payload = parseJsonRpcMessage(response.responseText);
+
+        // Transform the tools to the format that's expected by Gemini. It's
+        // almost the same format as mcp but they use "parameters" instead of
+        // "inputSchema".
+        const functions = payload.result.tools.map(tool => {
+          // Delete additional fields that Google doesn't recognize.
+          const parameters = tool.inputSchema;
+          delete parameters.additionalProperties;
+          delete parameters["$schema"];
+
+          // Add standard string type if none is set and delete defaults that are
+          // not supported in AI Studio.
+          for (const key in parameters.properties) {
+            if (parameters.properties[key].type === undefined) {
+              parameters.properties[key].type = "string";
+            }
+            delete parameters.properties[key].default;
+          }
+
+          return {
+            name: tool.name,
+            description: tool.description.trim(),
+            parameters: parameters,
+          }
+        });
+        const declarationJson = JSON.stringify(functions, null, 2);
+
+        /** @type {HTMLTextAreaElement} */
+        // @ts-ignore
+        const textarea = safeQuerySelector(node, "textarea");
+        setTextareaValue(textarea, declarationJson);
+        // @ts-ignore
+        await GM.setValue("mcpServerUrl", urlInput.value);
+      },
+      onerror: function (error) {
+        alert(`Failed to load tools from '${urlInput.value}'.`)
+      },
+      data: JSON.stringify(payload),
+    });
+  });
+
+  /** @type {HTMLInputElement} */
+  // @ts-ignore
+  const checkbox = safeQuerySelector(mcpContainer, "#mcpAutoSubmitCheckbox");
+  // @ts-ignore
+  checkbox.checked = await GM.getValue("mcpAutoSubmit");
+  checkbox.addEventListener("click", async () => {
+    // @ts-ignore
+    await GM.setValue("mcpAutoSubmit", checkbox.checked);
+    console.log(`Changed mcpAutoSubmit to '${checkbox.checked}'.`)
+  });
 }
 
 
@@ -334,22 +342,32 @@ function mutationCallback(mutationsList, observer) {
         --color-mcp-l35: #fde9ce;
       }
 
-      .gmat-mdc-button.mat-mcp {
-        background-color: var(--color-mcp-l35);
+      .mcp-flex {
+        display: flex;
+        align-items: center;
+        flax-wrap: nowrap;
+        margin-bottom: 4px;
       }
 
-      .gmat-mdc-button.mat-mcp:hover {
+      .mcp-dialog-container {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      .mcp-dialog-container input[type=text] {
+        margin-right: 8px;
+        flex-grow: 1;
+        min-width: 200px;
+        border-radius: 4px;
+        border-color: var(--color-mcp-l35);
+        border-style: solid;
+        padding: 5px;
+      }
+
+      .mcp-dialog-container button {
         background-color: var(--color-mcp);
-      }
-
-      .gmat-mdc-button.mat-mcp:hover .mdc-button__label {
-          color: var(--color-on-primary);
-      }
-
-      .mat-mdc-dialog-actions {
-        display: flex;           /* Enables Flexbox */
-        align-items: center;     /* Optional: vertically aligns items */
-        flex-wrap: nowrap;       /* Prevents items from wrapping to the next line */
       }
     </style>`
   ))
